@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Dragvertising Superadmin Debug",
+  "version": "1.0.0",
+  "description": "Toggle and control Dragvertising Superadmin Debug panel from the browser.",
+  "action": {
+    "default_title": "Superadmin Debug",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon.png",
+      "32": "icons/icon.png",
+      "48": "icons/icon.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon.png",
+    "32": "icons/icon.png",
+    "48": "icons/icon.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": ["scripting", "activeTab", "storage"],
+  "host_permissions": [
+    "http://localhost:8080/*",
+    "https://dragvertising.com/*",
+    "https://www.dragvertising.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost:8080/*",
+        "https://dragvertising.com/*",
+        "https://www.dragvertising.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
