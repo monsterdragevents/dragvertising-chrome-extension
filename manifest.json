@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Dragvertising Superadmin Debug",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Toggle and control Dragvertising Superadmin Debug panel from the browser.",
   "action": {
     "default_title": "Superadmin Debug",

@@ -1,60 +1,145 @@
-(function () {
+/**
+ * Dragvertising Superadmin Debug Extension - Popup Script
+ * 
+ * Handles the extension popup UI and communication with content script
+ * 
+ * @version 2.0.0
+ */
+
+(function() {
   'use strict';
 
-  const openBtn = document.getElementById('open');
-  const closeBtn = document.getElementById('close');
-  const toggleBtn = document.getElementById('toggle');
-  const setToolBtn = document.getElementById('setTool');
-  const toolSelect = document.getElementById('tool');
-  const statusChip = document.getElementById('status');
-  const errorMsg = document.getElementById('error');
+  // ============================================================================
+  // DOM Elements
+  // ============================================================================
 
-  let currentTabId = null;
-  let isConnected = false;
+  const elements = {
+    openBtn: document.getElementById('open'),
+    closeBtn: document.getElementById('close'),
+    toggleBtn: document.getElementById('toggle'),
+    setToolBtn: document.getElementById('setTool'),
+    toolSelect: document.getElementById('tool'),
+    statusChip: document.getElementById('status'),
+    errorMsg: document.getElementById('error')
+  };
 
-  // Update UI state
+  // ============================================================================
+  // State
+  // ============================================================================
+
+  let state = {
+    currentTabId: null,
+    isConnected: false,
+    isOpen: false,
+    currentTool: 'role',
+    refreshInterval: null
+  };
+
+  // ============================================================================
+  // UI Updates
+  // ============================================================================
+
+  /**
+   * Updates the popup UI based on connection state
+   */
   function updateUI(connected, isOpen, tool, error = null) {
-    isConnected = connected;
-    
+    state.isConnected = connected;
+    state.isOpen = isOpen;
+    state.currentTool = tool || 'role';
+
+    // Handle error state
     if (error) {
-      if (errorMsg) {
-        errorMsg.textContent = error;
-        errorMsg.style.display = 'block';
-      }
-      if (statusChip) {
-        statusChip.textContent = 'Error';
-        statusChip.style.background = '#fee';
-        statusChip.style.borderColor = '#f00';
-      }
-      [openBtn, closeBtn, toggleBtn, setToolBtn, toolSelect].forEach(el => {
-        if (el) el.disabled = true;
-      });
+      showError(error);
+      disableControls(true);
       return;
     }
 
-    if (errorMsg) {
-      errorMsg.style.display = 'none';
-    }
+    // Clear error
+    hideError();
 
-    if (statusChip) {
-      statusChip.textContent = connected ? (isOpen ? 'Open' : 'Closed') : 'Disconnected';
-      statusChip.style.background = connected 
-        ? (isOpen ? '#e6ffed' : '#fff') 
-        : '#fff3cd';
-      statusChip.style.borderColor = connected
-        ? (isOpen ? '#2ecc71' : '#d0d0d0')
-        : '#ffc107';
-    }
+    // Update status chip
+    updateStatusChip(connected, isOpen);
 
-    const buttons = [openBtn, closeBtn, toggleBtn, setToolBtn];
-    buttons.forEach(el => {
-      if (el) el.disabled = !connected;
-    });
-    if (toolSelect) toolSelect.disabled = !connected;
-    if (toolSelect && tool) toolSelect.value = tool;
+    // Enable/disable controls
+    disableControls(!connected);
+
+    // Update tool select
+    if (elements.toolSelect && tool) {
+      elements.toolSelect.value = tool;
+    }
   }
 
-  // Get active tab
+  /**
+   * Updates the status chip appearance
+   */
+  function updateStatusChip(connected, isOpen) {
+    if (!elements.statusChip) return;
+
+    if (!connected) {
+      elements.statusChip.textContent = 'Disconnected';
+      elements.statusChip.style.background = '#fff3cd';
+      elements.statusChip.style.borderColor = '#ffc107';
+    } else if (isOpen) {
+      elements.statusChip.textContent = 'Open';
+      elements.statusChip.style.background = '#e6ffed';
+      elements.statusChip.style.borderColor = '#2ecc71';
+    } else {
+      elements.statusChip.textContent = 'Closed';
+      elements.statusChip.style.background = '#fff';
+      elements.statusChip.style.borderColor = '#d0d0d0';
+    }
+  }
+
+  /**
+   * Shows an error message
+   */
+  function showError(message) {
+    if (elements.errorMsg) {
+      elements.errorMsg.textContent = message;
+      elements.errorMsg.style.display = 'block';
+    }
+    if (elements.statusChip) {
+      elements.statusChip.textContent = 'Error';
+      elements.statusChip.style.background = '#fee';
+      elements.statusChip.style.borderColor = '#f00';
+    }
+  }
+
+  /**
+   * Hides the error message
+   */
+  function hideError() {
+    if (elements.errorMsg) {
+      elements.errorMsg.style.display = 'none';
+    }
+  }
+
+  /**
+   * Enables or disables all controls
+   */
+  function disableControls(disabled) {
+    const controls = [
+      elements.openBtn,
+      elements.closeBtn,
+      elements.toggleBtn,
+      elements.setToolBtn,
+      elements.toolSelect
+    ];
+
+    controls.forEach(el => {
+      if (el) {
+        el.disabled = disabled;
+      }
+    });
+  }
+
+  // ============================================================================
+  // Tab Management
+  // ============================================================================
+
+  /**
+   * Gets the currently active tab
+   */
   async function getActiveTab() {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -63,174 +148,275 @@
       }
       return tab;
     } catch (error) {
-      console.error('Error getting active tab:', error);
+      console.error('[Popup] Error getting active tab:', error);
       throw error;
     }
   }
 
-  // Check if URL is allowed
+  /**
+   * Checks if a URL is allowed for the extension
+   */
   function isAllowedUrl(url) {
     if (!url) return false;
-    return /^https?:\/\/(localhost:8080|(?:www\.)?dragvertising\.com)\//.test(url);
+    const allowedPattern = /^https?:\/\/(localhost:8080|(?:www\.)?dragvertising\.com)/;
+    return allowedPattern.test(url);
   }
 
-  // Execute script in page context
+  // ============================================================================
+  // Script Execution
+  // ============================================================================
+
+  /**
+   * Executes a function in the page context
+   */
   async function execScript(func, args = []) {
-    if (!currentTabId) {
+    if (!state.currentTabId) {
       throw new Error('No active tab');
     }
 
+    // Serialize arguments safely
     const safeArgs = Array.isArray(args)
       ? args.map((v) => {
-          if (v === undefined) return null;
+          if (v === undefined || v === null) return null;
           try {
             return JSON.parse(JSON.stringify(v));
-          } catch (_) {
-            return null;
+          } catch {
+            return String(v);
           }
         })
       : [];
 
     try {
       const results = await chrome.scripting.executeScript({
-        target: { tabId: currentTabId },
+        target: { tabId: state.currentTabId },
         func,
         args: safeArgs,
         world: 'MAIN'
       });
+      
       return results?.[0]?.result;
     } catch (error) {
-      console.error('Error executing script:', error);
+      console.error('[Popup] Error executing script:', error);
       throw new Error(`Failed to execute: ${error.message}`);
     }
   }
 
-  // API functions to inject
-  function apiToggle(desired) {
-    if (!window.dvDebug) {
-      throw new Error('Debug API not available. Make sure you are logged in as superadmin.');
-    }
-    if (desired === true) {
-      window.dvDebug.open();
-    } else if (desired === false) {
-      window.dvDebug.close();
-    } else {
-      window.dvDebug.toggle();
-    }
-  }
+  // ============================================================================
+  // Debug API Functions
+  // ============================================================================
 
-  function apiSetTool(tool) {
-    if (!window.dvDebug) {
-      throw new Error('Debug API not available. Make sure you are logged in as superadmin.');
+  /**
+   * Functions that will be injected into the page to interact with window.dvDebug
+   */
+  const apiFunctions = {
+    toggle: function(desired) {
+      if (!window.dvDebug) {
+        throw new Error('Debug API not available. Make sure you are logged in as superadmin and the component is injected.');
+      }
+      if (desired === true) {
+        window.dvDebug.open();
+      } else if (desired === false) {
+        window.dvDebug.close();
+      } else {
+        window.dvDebug.toggle();
+      }
+    },
+
+    setTool: function(tool) {
+      if (!window.dvDebug) {
+        throw new Error('Debug API not available. Make sure you are logged in as superadmin and the component is injected.');
+      }
+      window.dvDebug.setTool(tool);
+    },
+
+    getState: function() {
+      const LS_KEY = 'dv_debug_visible';
+      const TOOL_LS_KEY = 'dv_debug_active_tool';
+      
+      const isOpen = window.dvDebug 
+        ? window.dvDebug.isOpen() 
+        : localStorage.getItem(LS_KEY) === '1';
+      const tool = localStorage.getItem(TOOL_LS_KEY) || 'role';
+      const hasApi = !!window.dvDebug;
+      
+      return { isOpen, tool, hasApi };
     }
-    window.dvDebug.setTool(tool);
-  }
+  };
 
-  function getState() {
-    const LS_KEY = 'dv_debug_visible';
-    const TOOL_LS_KEY = 'dv_debug_active_tool';
-    
-    const isOpen = window.dvDebug 
-      ? window.dvDebug.isOpen() 
-      : localStorage.getItem(LS_KEY) === '1';
-    const tool = localStorage.getItem(TOOL_LS_KEY) || 'role';
-    const hasApi = !!window.dvDebug;
-    
-    return { isOpen, tool, hasApi };
-  }
+  // ============================================================================
+  // State Management
+  // ============================================================================
 
-  // Load current state
+  /**
+   * Loads the current debug panel state from the page
+   */
   async function loadState() {
     try {
       const tab = await getActiveTab();
-      currentTabId = tab.id;
+      state.currentTabId = tab.id;
 
+      // Check if URL is allowed
       if (!isAllowedUrl(tab.url)) {
         updateUI(false, false, null, 'Please navigate to dragvertising.com or localhost:8080');
         return;
       }
 
-      const state = await execScript(getState);
+      // First, try to inject the component if needed
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: state.currentTabId },
+          func: () => {
+            // Trigger injection if not already done
+            if (!window.dvDebugInjected && window.__DRAGVERTISING_DEBUG__) {
+              // Dispatch event to trigger injection
+              window.dispatchEvent(new CustomEvent('dv-debug-request-injection'));
+            }
+          },
+          world: 'MAIN'
+        });
+      } catch (error) {
+        console.debug('[Popup] Injection trigger failed (may already be injected):', error);
+      }
+
+      // Wait a bit for injection
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Get state
+      const result = await execScript(apiFunctions.getState);
       
-      if (!state) {
+      if (!result) {
         updateUI(false, false, null, 'Unable to read debug state');
         return;
       }
 
-      if (!state.hasApi) {
+      if (!result.hasApi) {
         updateUI(false, false, null, 'Debug API not found. Make sure you are logged in as superadmin.');
         return;
       }
 
-      updateUI(true, state.isOpen, state.tool);
+      updateUI(true, result.isOpen, result.tool);
     } catch (error) {
-      console.error('Error loading state:', error);
+      console.error('[Popup] Error loading state:', error);
       updateUI(false, false, null, error.message || 'Connection error');
     }
   }
 
-  // Event handlers
-  openBtn.addEventListener('click', async () => {
-    try {
-      await execScript(apiToggle, [true]);
-      await loadState(); // Refresh state
-    } catch (error) {
-      updateUI(false, false, null, error.message);
+  /**
+   * Starts auto-refresh of state
+   */
+  function startAutoRefresh() {
+    if (state.refreshInterval) {
+      clearInterval(state.refreshInterval);
     }
-  });
+    
+    state.refreshInterval = setInterval(() => {
+      if (state.isConnected) {
+        loadState().catch(console.error);
+      }
+    }, 2000);
+  }
 
-  closeBtn.addEventListener('click', async () => {
-    try {
-      await execScript(apiToggle, [false]);
-      await loadState(); // Refresh state
-    } catch (error) {
-      updateUI(false, false, null, error.message);
+  /**
+   * Stops auto-refresh
+   */
+  function stopAutoRefresh() {
+    if (state.refreshInterval) {
+      clearInterval(state.refreshInterval);
+      state.refreshInterval = null;
     }
-  });
+  }
 
-  toggleBtn.addEventListener('click', async () => {
-    try {
-      await execScript(apiToggle, [null]);
-      await loadState(); // Refresh state
-    } catch (error) {
-      updateUI(false, false, null, error.message);
-    }
-  });
+  // ============================================================================
+  // Event Handlers
+  // ============================================================================
 
-  setToolBtn.addEventListener('click', async () => {
-    const tool = toolSelect.value;
-    if (!tool) return;
+  /**
+   * Handles button clicks with error handling
+   */
+  async function handleAction(action, ...args) {
     try {
-      await execScript(apiSetTool, [tool]);
-      await loadState(); // Refresh state
+      await execScript(apiFunctions[action], args);
+      await loadState(); // Refresh state after action
     } catch (error) {
       updateUI(false, false, null, error.message);
     }
-  });
+  }
+
+  // Open button
+  if (elements.openBtn) {
+    elements.openBtn.addEventListener('click', () => {
+      handleAction('toggle', true);
+    });
+  }
+
+  // Close button
+  if (elements.closeBtn) {
+    elements.closeBtn.addEventListener('click', () => {
+      handleAction('toggle', false);
+    });
+  }
+
+  // Toggle button
+  if (elements.toggleBtn) {
+    elements.toggleBtn.addEventListener('click', () => {
+      handleAction('toggle', null);
+    });
+  }
+
+  // Set tool button
+  if (elements.setToolBtn && elements.toolSelect) {
+    elements.setToolBtn.addEventListener('click', () => {
+      const tool = elements.toolSelect.value;
+      if (tool) {
+        handleAction('setTool', tool);
+      }
+    });
+  }
 
   // Tool grid buttons
   document.querySelectorAll('.tool').forEach((el) => {
     el.addEventListener('click', async () => {
       const tool = el.getAttribute('data-tool');
       if (!tool) return;
+      
       try {
-        toolSelect.value = tool;
-        await execScript(apiSetTool, [tool]);
-        await execScript(apiToggle, [true]);
-        await loadState(); // Refresh state
+        if (elements.toolSelect) {
+          elements.toolSelect.value = tool;
+        }
+        await execScript(apiFunctions.setTool, [tool]);
+        await execScript(apiFunctions.toggle, [true]);
+        await loadState();
       } catch (error) {
         updateUI(false, false, null, error.message);
       }
     });
   });
 
-  // Initialize on load
-  loadState();
+  // ============================================================================
+  // Initialization
+  // ============================================================================
 
-  // Refresh state every 2 seconds to keep UI in sync
-  setInterval(() => {
-    if (isConnected) {
-      loadState();
-    }
-  }, 2000);
+  /**
+   * Initializes the popup
+   */
+  async function init() {
+    // Initial state load
+    await loadState();
+    
+    // Start auto-refresh
+    startAutoRefresh();
+    
+    // Clean up on popup close
+    window.addEventListener('beforeunload', () => {
+      stopAutoRefresh();
+    });
+  }
+
+  // Start initialization when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
 })();
